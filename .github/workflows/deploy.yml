@@ -40,28 +40,15 @@ jobs:
           mkdir -p /tmp/lambda_package
           echo "Temporary directory created"
 
-      - name: Install dependencies with cross‑compilation flags
+      - name: Install dependencies using Amazon Linux Docker container
         run: |
-          cd /tmp/lambda_package
-          # Força a instalação de wheels compatíveis com Amazon Linux (manylinux2014_x86_64)
-          pip install \
-            --platform manylinux2014_x86_64 \
-            --target . \
-            --only-binary=:all: \
-            --python-version 3.12 \
-            --implementation cp \
-            --abi cp312 \
-            -r ${{ github.workspace }}/src/producer_yfinance/requirements.txt
-          echo "Dependencies installed for Amazon Linux"
-          
-          # Se houver falha, tenta uma instalação mais permissiva (pode ser necessário para alguns pacotes)
-          if [ $? -ne 0 ]; then
-            echo "First attempt failed, trying without platform restriction (pure Python fallback)..."
-            pip install \
-              --target . \
-              --no-binary :all: \
-              -r ${{ github.workspace }}/src/producer_yfinance/requirements.txt
-          fi
+          # Usa a imagem oficial da Lambda Python 3.12 para instalar dependências
+          docker run --rm \
+            -v ${{ github.workspace }}/src/producer_yfinance/requirements.txt:/tmp/requirements.txt \
+            -v /tmp/lambda_package:/tmp/lambda_package \
+            public.ecr.aws/lambda/python:3.12 \
+            pip install --target /tmp/lambda_package -r /tmp/requirements.txt
+          echo "Dependencies installed in Amazon Linux compatible environment"
 
       - name: Copy Lambda function code
         run: |
