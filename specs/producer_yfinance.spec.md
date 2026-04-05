@@ -6,7 +6,7 @@ Esta função AWS Lambda tem como objetivo automatizar a coleta diária de dados
 
 ### 1.2. Escopo
 - **Gatilho**: EventBridge agendado diariamente às 18:00 (horário de Brasília).
-- **Entrada**: Lista de tickers configurada via variável de ambiente `TICKERS_LIST`.
+- **Entrada**: Payload JSON no formato `{"tickers": ["AAPL", "MSFT", "PETR4.SA"]}`. Se o gatilho for via EventBridge schedule, o payload pode ser configurado na regra.
 - **Processo**: Para cada ticker, busca dados OHLCV do dia atual via `yfinance`, aplica tratamento de erros e retentativas.
 - **Saída**: Mensagem JSON publicada em fila SQS configurável, com atributos de mensagem para identificação da origem.
 - **Fora do Escopo**:
@@ -57,10 +57,11 @@ AWS Lambda (producer_yfinance)
 ```
 
 ### 4.2. Fluxo de Execução
-1. **Trigger**: EventBridge dispara a Lambda diariamente às 18:00 (expressão cron: `cron(0 18 * * ? *)`).
+1. **Trigger**: EventBridge dispara a Lambda diariamente às 18:00 (expressão cron: `cron(0 18 * * ? *)`). O payload pode ser configurado na regra do EventBridge.
 2. **Configuração**:
-   - A função lê `TICKERS_LIST` (ex: "AAPL,GOOGL") e `SQS_QUEUE_URL` das variáveis de ambiente.
-   - Divide a lista de tickers em um array Python.
+   - A função lê o payload do evento, extrai a lista de tickers do campo `tickers`.
+   - Valida se a lista existe e não está vazia. Caso contrário, retorna erro 400.
+   - Lê `SQS_QUEUE_URL` das variáveis de ambiente.
 3. **Coleta de Dados**:
    - Para cada ticker no array:
      - Chama `yfinance.download(ticker, period="1d")`.
@@ -93,7 +94,6 @@ AWS Lambda (producer_yfinance)
 ### 5.1. Variáveis de Ambiente
 | Nome              | Obrigatório | Descrição                                                                 | Exemplo                     |
 |-------------------|-------------|---------------------------------------------------------------------------|-----------------------------|
-| `TICKERS_LIST`    | Sim         | Lista de tickers separados por vírgula, sem espaços.                      | `AAPL,GOOGL,MSFT`           |
 | `SQS_QUEUE_URL`   | Sim         | URL completa da fila SQS de destino.                                      | `https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue` |
 | `MAX_RETRIES`     | Não         | Número máximo de tentativas por ticker (padrão: 3).                       | `3`                         |
 | `RETRY_DELAY_SEC` | Não         | Delay entre tentativas em segundos (padrão: 2).                           | `2`                         |
@@ -174,7 +174,26 @@ def fetch_ticker_data(ticker: str, max_retries: int = 3, retry_delay: int = 2) -
     return None
 
 def lambda_handler(event, context):
-    tickers = os.getenv("TICKERS_LIST", "").split(",")
+    # Extrai a lista de tickers do payload do evento
+    # Suporta tanto eventos diretos {"tickers": [...]} quanto eventos do EventBridge com campo 'detail'
+    if "detail" in event and isinstance(event["detail"], dict) and "tickers" in event["detail"]:
+        tickers = event["detail"]["tickers"]
+    elif "tickers" in event:
+        tickers = event["tickers"]
+    else:
+        tickers = []
+    
+    # Validação da lista de tickers
+    if not tickers or not isinstance(tickers, list) or len(tickers) == 0:
+        logger.error("Lista de tickers ausente, vazia ou em formato inválido no payload do evento")
+        return {
+            "statusCode": 400,
+            "body": json.dumps({
+                "error": "A lista de tickers deve ser fornecida no campo 'tickers' do payload e não pode estar vazia",
+                "received_event": event
+            })
+        }
+    
     sqs_queue_url = os.getenv("SQS_QUEUE_URL")
     max_retries = int(os.getenv("MAX_RETRIES", "3"))
     retry_delay = int(os.getenv("RETRY_DELAY_SEC", "2"))

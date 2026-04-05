@@ -1,7 +1,7 @@
 """
 AWS Lambda para coleta de dados OHLCV do Yahoo Finance via yfinance.
 Acionada diariamente às 18:00 (horário de Brasília) via EventBridge.
-Coleta dados para tickers configurados em TICKERS_LIST e publica em fila SQS.
+Coleta dados para tickers fornecidos no payload do evento (campo "tickers") e publica em fila SQS.
 Em caso de falha persistente, envia mensagem para DLQ configurada em SQS_DLQ_URL.
 """
 
@@ -113,25 +113,39 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Handler principal da AWS Lambda.
 
     Args:
-        event: Dicionário com dados do evento (não utilizado diretamente, mas mantido para compatibilidade).
+        event: Dicionário com payload do evento. Espera-se campo "tickers" com lista de strings.
+               Também suporta eventos do EventBridge onde os tickers estão em event["detail"]["tickers"].
         context: Objeto de contexto Lambda.
 
     Returns:
         Dicionário com statusCode e body contendo métricas do processamento.
     """
     logger.info("Iniciando processamento do producer yfinance")
+    logger.debug(f"Evento recebido: {json.dumps(event)}")
+
+    # Extrai a lista de tickers do payload do evento
+    # Suporta tanto eventos diretos {"tickers": [...]} quanto eventos do EventBridge com campo 'detail'
+    if "detail" in event and isinstance(event["detail"], dict) and "tickers" in event["detail"]:
+        tickers = event["detail"]["tickers"]
+    elif "tickers" in event:
+        tickers = event["tickers"]
+    else:
+        tickers = []
+
+    # Validação da lista de tickers
+    if not tickers or not isinstance(tickers, list) or len(tickers) == 0:
+        logger.error("Lista de tickers ausente, vazia ou em formato inválido no payload do evento")
+        return {
+            "statusCode": 400,
+            "body": json.dumps({
+                "error": "A lista de tickers deve ser fornecida no campo 'tickers' do payload e não pode estar vazia",
+                "received_event": event
+            })
+        }
 
     # Leitura das variáveis de ambiente
-    tickers_list_str = os.getenv("TICKERS_LIST", "")
     sqs_queue_url = os.getenv("SQS_QUEUE_URL")
     sqs_dlq_url = os.getenv("SQS_DLQ_URL")  # Nova variável para DLQ
-
-    if not tickers_list_str:
-        logger.error("Variável de ambiente TICKERS_LIST não configurada")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": "TICKERS_LIST environment variable not set"}),
-        }
 
     if not sqs_queue_url:
         logger.error("Variável de ambiente SQS_QUEUE_URL não configurada")
@@ -145,7 +159,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     retry_delay_sec = int(os.getenv("RETRY_DELAY_SEC", "2"))
 
     # Processa cada ticker
-    tickers = [t.strip() for t in tickers_list_str.split(",") if t.strip()]
     logger.info(f"Tickers a processar: {tickers}")
 
     processed = 0
@@ -154,6 +167,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     dlq_sent = 0
 
     for ticker in tickers:
+        # Remove espaços em branco e ignora entradas vazias
+        ticker = str(ticker).strip()
+        if not ticker:
+            continue
+
         # Busca dados do ticker
         ticker_data = fetch_ticker_data(ticker, max_retries, retry_delay_sec)
 
