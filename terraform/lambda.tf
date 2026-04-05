@@ -10,6 +10,7 @@ resource "aws_lambda_function" "producer_yfinance" {
   environment {
     variables = {
       SQS_QUEUE_URL = aws_sqs_queue.financial_data_queue.id
+      SQS_DLQ_URL = aws_sqs_queue.financial_dlq.id
     }
   }
 
@@ -30,6 +31,7 @@ resource "aws_lambda_function" "producer_crypto" {
   environment {
     variables = {
       SQS_QUEUE_URL = aws_sqs_queue.financial_data_queue.id
+      SQS_DLQ_URL = aws_sqs_queue.financial_dlq.id
     }
   }
 
