@@ -1,0 +1,67 @@
+name: Deploy Lambda Producer yFinance
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/producer_yfinance/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # Permite disparo manual
+
+jobs:
+  deploy:
+    name: Deploy to AWS Lambda
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'  # Versão especificada na spec
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Create temporary directory for deployment package
+        run: |
+          mkdir -p /tmp/lambda_package
+          echo "Temporary directory created"
+
+      - name: Install dependencies
+        run: |
+          cd /tmp/lambda_package
+          pip install --target . -r ${{ github.workspace }}/src/producer_yfinance/requirements.txt
+          echo "Dependencies installed"
+
+      - name: Copy Lambda function code
+        run: |
+          cp ${{ github.workspace }}/src/producer_yfinance/lambda_function.py /tmp/lambda_package/
+          echo "Lambda function copied"
+
+      - name: Create deployment package (zip)
+        run: |
+          cd /tmp/lambda_package
+          zip -r9 ${{ github.workspace }}/deployment_package.zip .
+          echo "Deployment package created"
+
+      - name: Upload deployment package to AWS Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name financial-producer-yfinance \
+            --zip-file fileb://${{ github.workspace }}/deployment_package.zip \
+            --region ${{ secrets.AWS_REGION || 'us-east-1' }}
+          echo "Lambda function updated successfully"
+
+      - name: Clean up temporary files
+        run: |
+          rm -rf /tmp/lambda_package
+          rm -f ${{ github.workspace }}/deployment_package.zip
+          echo "Temporary files cleaned up"
