@@ -43,11 +43,13 @@ jobs:
       - name: Install dependencies using Amazon Linux Docker container
         run: |
           # Usa a imagem oficial da Lambda Python 3.12 para instalar dependências
+          # Sobrescreve o entrypoint para pip e executa a instalação
           docker run --rm \
+            --entrypoint pip \
             -v ${{ github.workspace }}/src/producer_yfinance/requirements.txt:/tmp/requirements.txt \
             -v /tmp/lambda_package:/tmp/lambda_package \
             public.ecr.aws/lambda/python:3.12 \
-            pip install --target /tmp/lambda_package -r /tmp/requirements.txt
+            install --target /tmp/lambda_package -r /tmp/requirements.txt
           echo "Dependencies installed in Amazon Linux compatible environment"
 
       - name: Copy Lambda function code
