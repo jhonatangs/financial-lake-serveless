@@ -24,7 +24,10 @@ resource "aws_iam_role_policy" "producer_policy" {
           "sqs:SendMessage"
         ]
         Effect   = "Allow"
-        Resource = aws_sqs_queue.financial_data_queue.arn
+        Resource = [
+          aws_sqs_queue.financial_data_queue.arn,
+          aws_sqs_queue.financial_dlq.arn
+        ]
       },
       {
         Action = [
