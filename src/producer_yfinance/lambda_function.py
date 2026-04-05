@@ -168,8 +168,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "max_retries": max_retries,
                 }
                 dlq_attributes = {
-                    "source": {"DataType": "String", "StringValue": "producer_yfinance"},
-                    "error_type": {"DataType": "String", "StringValue": "fetch_failure"}
+                    "source": {
+                        "DataType": "String",
+                        "StringValue": "producer_yfinance",
+                    },
+                    "error_type": {
+                        "DataType": "String",
+                        "StringValue": "fetch_failure",
+                    },
                 }
                 dlq_success = send_to_sqs(dlq_message, sqs_dlq_url, dlq_attributes)
                 if dlq_success:
@@ -199,11 +205,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "ticker": ticker,
                     "reason": "send_to_main_queue_failed",
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "original_data": ticker_data
+                    "original_data": ticker_data,
                 }
                 dlq_attributes = {
-                    "source": {"DataType": "String", "StringValue": "producer_yfinance"},
-                    "error_type": {"DataType": "String", "StringValue": "send_failure"}
+                    "source": {
+                        "DataType": "String",
+                        "StringValue": "producer_yfinance",
+                    },
+                    "error_type": {"DataType": "String", "StringValue": "send_failure"},
                 }
                 dlq_success = send_to_sqs(dlq_message, sqs_dlq_url, dlq_attributes)
                 if dlq_success:
