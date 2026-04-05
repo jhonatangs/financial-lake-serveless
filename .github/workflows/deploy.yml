@@ -53,12 +53,6 @@ jobs:
             install --target /tmp/lambda_package -r /tmp/requirements.txt
           echo "Dependencies installed in Amazon Linux compatible environment"
 
-      - name: Fix permissions on installed dependencies
-        run: |
-          # Altera o proprietário dos arquivos instalados pelo Docker (root) para o usuário atual
-          sudo chown -R $(id -u):$(id -g) /tmp/lambda_package
-          echo "Permissions fixed"
-
       - name: Copy Lambda function code
         run: |
           cp ${{ github.workspace }}/src/producer_yfinance/lambda_function.py /tmp/lambda_package/
