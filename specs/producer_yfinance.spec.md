@@ -25,7 +25,7 @@ Esta função AWS Lambda tem como objetivo automatizar a coleta diária de dados
 | ID   | Descrição                                                                                              | Prioridade |
 |------|--------------------------------------------------------------------------------------------------------|------------|
 | RF01 | A função deve ser acionada automaticamente todos os dias às 18:00 via Amazon EventBridge.              | Alta       |
-| RF02 | A lista de tickers a serem consultados deve ser lida da variável de ambiente `TICKERS_LIST` (formato: string separada por vírgulas, ex: "AAPL,GOOGL,BTC-USD"). | Alta       |
+| RF02 | A lista de tickers a serem consultados deve ser lida do payload do evento no formato JSON `{"tickers": ["AAPL", "MSFT"]}`. | Alta       |
 | RF03 | Para cada ticker, a função deve utilizar a biblioteca `yfinance` para buscar dados OHLCV do dia atual (período "1d"). | Alta       |
 | RF04 | Cada registro de saída deve conter os campos: `ticker`, `timestamp`, `open`, `high`, `low`, `close`, `volume`. | Alta       |
 | RF05 | Implementar mecanismo de retentativa (retry) em caso de falha na consulta à API do Yahoo Finance ou resposta vazia. | Alta       |
@@ -140,6 +140,35 @@ AWS Lambda (producer_yfinance)
   ]
 }
 ```
+
+### 5.4. Estrutura do Evento de Entrada
+O evento pode ser configurado no EventBridge para incluir um payload personalizado. A Lambda espera:
+
+```json
+{
+  "tickers": ["AAPL", "MSFT", "PETR4.SA"]
+}
+```
+
+Para gatilhos via EventBridge schedule, o payload pode ser configurado na regra. Exemplo de evento completo:
+
+```json
+{
+  "version": "0",
+  "id": "event-id",
+  "detail-type": "Scheduled Event",
+  "source": "aws.events",
+  "account": "123456789012",
+  "time": "2025-04-05T18:00:00Z",
+  "region": "us-east-1",
+  "resources": ["arn:aws:events:us-east-1:123456789012:rule/daily-market-close"],
+  "detail": {
+    "tickers": ["AAPL", "MSFT", "PETR4.SA"]
+  }
+}
+```
+
+A função extrairá a lista de `tickers` do campo `detail` (se existir) ou do próprio corpo do evento.
 
 ## 6. Considerações de Implementação
 ### 6.1. Código Python (Esboço)
