@@ -51,14 +51,39 @@ jobs:
           cd /tmp/lambda_package
           zip -r9 ${{ github.workspace }}/deployment_package.zip .
           echo "Deployment package created"
+          
+      - name: Generate unique S3 key
+        id: s3key
+        run: |
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          COMMIT_SHA_SHORT=$(echo ${{ github.sha }} | cut -c1-8)
+          S3_KEY="deployment_packages/financial-producer-yfinance-${COMMIT_SHA_SHORT}-${TIMESTAMP}.zip"
+          echo "S3_KEY=${S3_KEY}" >> $GITHUB_OUTPUT
+          echo "Generated S3 key: ${S3_KEY}"
 
-      - name: Upload deployment package to AWS Lambda
+      - name: Upload deployment package to S3 bucket
+        env:
+          S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME }}
+        run: |
+          # Verificar se o bucket foi fornecido
+          if [ -z "$S3_BUCKET_NAME" ]; then
+            echo "Error: AWS_S3_BUCKET_NAME secret is not set"
+            exit 1
+          fi
+          # Fazer upload do zip para o S3
+          aws s3 cp ${{ github.workspace }}/deployment_package.zip s3://$S3_BUCKET_NAME/${{ steps.s3key.outputs.S3_KEY }}
+          echo "Deployment package uploaded to S3 bucket: $S3_BUCKET_NAME, key: ${{ steps.s3key.outputs.S3_KEY }}"
+
+      - name: Update Lambda function code from S3
+        env:
+          S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME }}
         run: |
           aws lambda update-function-code \
             --function-name financial-producer-yfinance \
-            --zip-file fileb://${{ github.workspace }}/deployment_package.zip \
+            --s3-bucket $S3_BUCKET_NAME \
+            --s3-key ${{ steps.s3key.outputs.S3_KEY }} \
             --region ${{ secrets.AWS_REGION || 'us-east-1' }}
-          echo "Lambda function updated successfully"
+          echo "Lambda function updated successfully from S3"
 
       - name: Clean up temporary files
         run: |
