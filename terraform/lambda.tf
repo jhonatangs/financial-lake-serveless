@@ -2,7 +2,7 @@ resource "aws_lambda_function" "producer_yfinance" {
   function_name = "financial-producer-yfinance"
   role          = aws_iam_role.producer_role.arn
   handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
+  runtime       = "python3.12"
   timeout       = 60 
   memory_size   = 128
   filename      = "dummy.zip"
@@ -22,7 +22,7 @@ resource "aws_lambda_function" "producer_crypto" {
   function_name = "financial-producer-crypto"
   role          = aws_iam_role.producer_role.arn # Reutilizamos a mesma role!
   handler       = "producer.lambda_handler"
-  runtime       = "python3.10"
+  runtime       = "python3.12"
   timeout       = 60 
   memory_size   = 128
   filename      = "dummy.zip"
@@ -79,7 +79,7 @@ resource "aws_lambda_function" "consumer_s3" {
   function_name = "financial-consumer-s3"
   role          = aws_iam_role.consumer_role.arn
   handler       = "consumer.lambda_handler"
-  runtime       = "python3.10"
+  runtime       = "python3.12"
   timeout       = 120
   memory_size   = 256
   filename      = "dummy.zip"
