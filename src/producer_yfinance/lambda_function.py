@@ -2,6 +2,7 @@
 AWS Lambda para coleta de dados OHLCV do Yahoo Finance via yfinance.
 Acionada diariamente às 18:00 (horário de Brasília) via EventBridge.
 Coleta dados para tickers configurados em TICKERS_LIST e publica em fila SQS.
+Em caso de falha persistente, envia mensagem para DLQ configurada em SQS_DLQ_URL.
 """
 
 import os
@@ -123,6 +124,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # Leitura das variáveis de ambiente
     tickers_list_str = os.getenv("TICKERS_LIST", "")
     sqs_queue_url = os.getenv("SQS_QUEUE_URL")
+    sqs_dlq_url = os.getenv("SQS_DLQ_URL")  # Nova variável para DLQ
 
     if not tickers_list_str:
         logger.error("Variável de ambiente TICKERS_LIST não configurada")
@@ -149,6 +151,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     processed = 0
     failed_fetch = 0
     failed_send = 0
+    dlq_sent = 0
 
     for ticker in tickers:
         # Busca dados do ticker
@@ -156,6 +159,26 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         if ticker_data is None:
             failed_fetch += 1
+            # Envia mensagem para DLQ se configurada
+            if sqs_dlq_url:
+                dlq_message = {
+                    "ticker": ticker,
+                    "reason": "fetch_failed_after_all_retries",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "max_retries": max_retries,
+                }
+                dlq_attributes = {
+                    "source": {"DataType": "String", "StringValue": "producer_yfinance"},
+                    "error_type": {"DataType": "String", "StringValue": "fetch_failure"}
+                }
+                dlq_success = send_to_sqs(dlq_message, sqs_dlq_url, dlq_attributes)
+                if dlq_success:
+                    dlq_sent += 1
+                    logger.info(f"Mensagem de falha enviada para DLQ: {ticker}")
+                else:
+                    logger.error(f"Falha ao enviar mensagem para DLQ: {ticker}")
+            else:
+                logger.warning(f"DLQ não configurada para falha do ticker: {ticker}")
             continue
 
         # Prepara atributos da mensagem (conforme spec)
@@ -163,20 +186,39 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "source": {"DataType": "String", "StringValue": "producer_yfinance"}
         }
 
-        # Envia para SQS
+        # Envia para SQS principal
         success = send_to_sqs(ticker_data, sqs_queue_url, message_attributes)
 
         if success:
             processed += 1
         else:
             failed_send += 1
+            # Em caso de falha no envio para a fila principal, também enviar para DLQ se configurada
+            if sqs_dlq_url:
+                dlq_message = {
+                    "ticker": ticker,
+                    "reason": "send_to_main_queue_failed",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "original_data": ticker_data
+                }
+                dlq_attributes = {
+                    "source": {"DataType": "String", "StringValue": "producer_yfinance"},
+                    "error_type": {"DataType": "String", "StringValue": "send_failure"}
+                }
+                dlq_success = send_to_sqs(dlq_message, sqs_dlq_url, dlq_attributes)
+                if dlq_success:
+                    dlq_sent += 1
+                    logger.info(f"Falha de envio para DLQ: {ticker}")
+                else:
+                    logger.error(f"Falha ao enviar falha de envio para DLQ: {ticker}")
 
     # Log final e métricas
     total = len(tickers)
     logger.info(
         f"Processamento concluído. "
         f"Total: {total}, Processados: {processed}, "
-        f"Falhas busca: {failed_fetch}, Falhas envio: {failed_send}"
+        f"Falhas busca: {failed_fetch}, Falhas envio: {failed_send}, "
+        f"Mensagens DLQ enviadas: {dlq_sent}"
     )
 
     # Retorno compatível com API Gateway (se usado via HTTP)
@@ -187,6 +229,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "processed": processed,
                 "failed_fetch": failed_fetch,
                 "failed_send": failed_send,
+                "dlq_sent": dlq_sent,
                 "total_tickers": total,
             }
         ),
