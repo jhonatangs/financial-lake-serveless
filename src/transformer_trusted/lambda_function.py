@@ -203,7 +203,7 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
         df_prepared = prepare_dataframe_for_iceberg(df, table_name)
         
         # Escrever dados (append) - awswrangler cria a tabela automaticamente se não existir
-        wr.dataframes.to_iceberg(
+        wr.iceberg.to_iceberg(
             df=df_prepared,
             database=database,
             table=table_name,
