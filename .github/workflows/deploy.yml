@@ -1,4 +1,4 @@
-name: Deploy Lambda Producers
+name: Deploy Lambda Functions
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/producer_yfinance/**'
       - 'src/producer_coingecko/**'
+      - 'src/consumer_s3/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:  # Permite disparo manual
 
@@ -21,6 +22,8 @@ jobs:
             function_name: financial-producer-yfinance
           - function_dir: producer_coingecko
             function_name: financial-producer-coingecko
+          - function_dir: consumer_s3
+            function_name: financial-consumer-s3
     env:
       FUNCTION_DIR: ${{ matrix.function_dir }}
       FUNCTION_NAME: ${{ matrix.function_name }}
