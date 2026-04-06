@@ -144,5 +144,3 @@ O fluxo é acionado a cada push na branch `main` ou manualmente via `workflow_di
 Este projeto é destinado a fins educacionais e de demonstração. Sinta‑se à vontade para adaptá‑lo às suas necessidades.
 
 ---
-
-**Feito com ❤️ pela equipe de Engenharia de Dados.**
