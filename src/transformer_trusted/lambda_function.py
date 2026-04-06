@@ -4,6 +4,7 @@ import logging
 import traceback
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
+from urllib.parse import unquote_plus
 import boto3
 import awswrangler as wr
 import pandas as pd
@@ -232,11 +233,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     for record in event.get("Records", []):
         try:
             s3_bucket = record["s3"]["bucket"]["name"]
-            s3_key = record["s3"]["object"]["key"]
+            # Decodificar a chave S3 (pode conter url-encoding, ex: '=' -> '%3D')
+            s3_key = unquote_plus(record["s3"]["object"]["key"])
             
             logger.info(f"Processando arquivo: s3://{s3_bucket}/{s3_key}")
             
-            # Identificar origem
+            # Identificar origem (a chave já está decodificada)
             source = extract_source_from_key(s3_key)
             if not source:
                 logger.warning(f"Origem desconhecida para key {s3_key}, ignorando.")
