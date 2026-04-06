@@ -51,57 +51,29 @@ def extract_partition_date(s3_key: str) -> Optional[str]:
         pass
     return None
 
-def extract_coin_id_from_key(s3_key: str) -> str:
-    """
-    Extrai o coin_id do caminho S3 para dados CoinGecko.
-    O padrão esperado é: raw/producer_coingecko/year=.../month=.../day=.../coin_id/arquivo.json
-    """
-    parts = s3_key.split("/")
-    # Remover partes vazias
-    parts = [p for p in parts if p]
-    # Procurar pelo segmento que não é year=..., month=..., day=... e não é o arquivo .json
-    for i, part in enumerate(parts):
-        if part.startswith(("year=", "month=", "day=")):
-            continue
-        # Se não for o último (arquivo) e não for "raw" nem "producer_coingecko"
-        if i < len(parts)-1 and part not in ("raw", "producer_coingecko"):
-            # O próximo não é um padrão de data? então este é o coin_id
-            if not parts[i+1].startswith(("year=", "month=", "day=")):
-                return part
-    return "unknown"
-
 def transform_coingecko_data(raw_json: Any, s3_key: str) -> pd.DataFrame:
     """
     Transforma dados do CoinGecko em DataFrame.
-    Suporta dois formatos:
-    1. Novo formato: dict com 'coin_id' e 'ohlc_data'
-    2. Formato antigo: list de listas (para compatibilidade)
+    Espera um dicionário com 'coin_id' e 'ohlc_data'.
     """
     records = []
-    coin_id = "unknown"
     
-    # Caso 1: Novo formato (dicionário)
-    if isinstance(raw_json, dict):
-        # Extrair coin_id do JSON
-        coin_id = raw_json.get("coin_id", "unknown")
-        
-        # Extrair ohlc_data
-        ohlc_data = raw_json.get("ohlc_data", [])
-        if not isinstance(ohlc_data, list):
-            logger.error(f"ohlc_data não é uma lista: tipo {type(ohlc_data)}")
-            return pd.DataFrame()
-        data_to_process = ohlc_data
-    # Caso 2: Formato antigo (lista de listas)
-    elif isinstance(raw_json, list):
-        # Para compatibilidade, usar coin_id extraído do caminho S3
-        coin_id = extract_coin_id_from_key(s3_key)
-        data_to_process = raw_json
-    else:
-        logger.error(f"JSON inesperado para CoinGecko: tipo {type(raw_json)}")
+    # Verificar se o JSON é um dicionário
+    if not isinstance(raw_json, dict):
+        logger.error(f"JSON inesperado para CoinGecko: tipo {type(raw_json)}. Esperado dict.")
+        return pd.DataFrame()
+    
+    # Extrair coin_id do JSON
+    coin_id = raw_json.get("coin_id", "unknown")
+    
+    # Extrair ohlc_data
+    ohlc_data = raw_json.get("ohlc_data", [])
+    if not isinstance(ohlc_data, list):
+        logger.error(f"ohlc_data não é uma lista: tipo {type(ohlc_data)}")
         return pd.DataFrame()
     
     # Processar cada item OHLC
-    for item in data_to_process:
+    for item in ohlc_data:
         if isinstance(item, list) and len(item) >= 5:
             timestamp_ms, open_price, high, low, close = item[:5]
             # Converter milissegundos para datetime UTC
@@ -117,11 +89,11 @@ def transform_coingecko_data(raw_json: Any, s3_key: str) -> pd.DataFrame:
                 "close": float(close) if close is not None else None
             })
         else:
-            logger.warning(f"Item em dados OHLC não é uma lista válida: {item}")
+            logger.warning(f"Item em ohlc_data não é uma lista válida: {item}")
     
     df = pd.DataFrame(records)
     if not df.empty:
-        # Usar coin_id (extraído do JSON ou do caminho S3)
+        # Usar coin_id extraído do JSON
         df["coin_id"] = coin_id
         
         # Adicionar ingestion_date a partir do caminho S3
