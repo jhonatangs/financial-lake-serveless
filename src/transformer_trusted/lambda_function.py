@@ -190,7 +190,7 @@ def prepare_dataframe_for_iceberg(df: pd.DataFrame, table_type: str) -> pd.DataF
 def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: str, location_prefix: str) -> bool:
     """
     Escreve DataFrame em tabela Iceberg usando awswrangler.
-    Compatível com diferentes versões do awswrangler.
+    Usa wr.s3.to_parquet com iceberg_integration=True (awswrangler 2.x).
     """
     if df.empty:
         logger.warning(f"DataFrame vazio para tabela {table_name}, ignorando.")
@@ -203,142 +203,39 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
         # Preparar DataFrame
         df_prepared = prepare_dataframe_for_iceberg(df, table_name)
         
-        # Tentar diferentes métodos dependendo da versão do awswrangler
-        # 1. Tentar wr.iceberg.to_iceberg (versão 3.x)
-        # 2. Tentar wr.catalog.to_iceberg (versão 2.18+)
-        # 3. Tentar wr.dataframes.to_iceberg (versão 2.x antiga)
-        # 4. Fallback para wr.catalog.create_iceberg_table + wr.s3.to_parquet
-        
-        success = False
-        error_msgs = []
-        
-        # Método 1: wr.iceberg.to_iceberg
+        # Tentar com iceberg_integration=True
         try:
-            wr.iceberg.to_iceberg(
+            wr.s3.to_parquet(
                 df=df_prepared,
+                path=table_location,
+                dataset=True,
+                mode="append",
+                partition_cols=["ingestion_date"],
                 database=database,
                 table=table_name,
-                table_location=table_location,
-                partition_cols=["ingestion_date"],
+                catalog_id=None,
+                catalog_versioning=False,
+                iceberg_integration=True
+            )
+            logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.s3.to_parquet com iceberg_integration")
+            return True
+        except TypeError as e:
+            # iceberg_integration pode não ser suportado
+            logger.warning(f"iceberg_integration não suportado: {e}. Tentando sem...")
+            # Tentar sem iceberg_integration (cria tabela Hive normal)
+            wr.s3.to_parquet(
+                df=df_prepared,
+                path=table_location,
+                dataset=True,
                 mode="append",
+                partition_cols=["ingestion_date"],
+                database=database,
+                table=table_name,
                 catalog_id=None,
                 catalog_versioning=False
             )
-            logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.iceberg.to_iceberg")
-            success = True
-        except AttributeError as e1:
-            error_msgs.append(f"wr.iceberg.to_iceberg não disponível: {e1}")
-        except Exception as e1:
-            error_msgs.append(f"Erro em wr.iceberg.to_iceberg: {e1}")
-        
-        # Método 2: wr.catalog.to_iceberg
-        if not success:
-            try:
-                wr.catalog.to_iceberg(
-                    df=df_prepared,
-                    database=database,
-                    table=table_name,
-                    table_location=table_location,
-                    partition_cols=["ingestion_date"],
-                    mode="append",
-                    catalog_id=None,
-                    catalog_versioning=False
-                )
-                logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.catalog.to_iceberg")
-                success = True
-            except AttributeError as e2:
-                error_msgs.append(f"wr.catalog.to_iceberg não disponível: {e2}")
-            except Exception as e2:
-                error_msgs.append(f"Erro em wr.catalog.to_iceberg: {e2}")
-        
-        # Método 3: wr.dataframes.to_iceberg
-        if not success:
-            try:
-                wr.dataframes.to_iceberg(
-                    df=df_prepared,
-                    database=database,
-                    table=table_name,
-                    table_location=table_location,
-                    partition_cols=["ingestion_date"],
-                    mode="append",
-                    catalog_id=None,
-                    catalog_versioning=False
-                )
-                logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.dataframes.to_iceberg")
-                success = True
-            except AttributeError as e3:
-                error_msgs.append(f"wr.dataframes.to_iceberg não disponível: {e3}")
-            except Exception as e3:
-                error_msgs.append(f"Erro em wr.dataframes.to_iceberg: {e3}")
-        
-        # Método 4: Fallback - criar tabela Iceberg manualmente e escrever dados
-        if not success:
-            try:
-                # Verificar se a tabela existe
-                tables = wr.catalog.get_tables(database=database)
-                table_exists = table_name in [t["Name"] for t in tables]
-                
-                if not table_exists:
-                    # Mapear tipos de colunas do DataFrame para tipos Iceberg
-                    column_types = {}
-                    for col in df_prepared.columns:
-                        dtype = str(df_prepared[col].dtype)
-                        if dtype.startswith("datetime64"):
-                            column_types[col] = "timestamp"
-                        elif dtype.startswith("int") or dtype == "Int64":
-                            column_types[col] = "bigint"
-                        elif dtype.startswith("float"):
-                            column_types[col] = "double"
-                        elif dtype.startswith("object") or dtype.startswith("string"):
-                            column_types[col] = "string"
-                        elif dtype == "date":
-                            column_types[col] = "date"
-                        else:
-                            column_types[col] = "string"  # fallback
-                    
-                    # Remover partition_cols dos column_types (já serão especificadas separadamente)
-                    partition_cols_set = set(["ingestion_date"])
-                    for pc in partition_cols_set:
-                        if pc in column_types:
-                            del column_types[pc]
-                    
-                    # Criar tabela Iceberg
-                    wr.catalog.create_iceberg_table(
-                        database=database,
-                        table=table_name,
-                        path=table_location,
-                        columns_types=column_types,
-                        partition_cols=list(partition_cols_set),
-                        file_format="parquet"
-                    )
-                    logger.info(f"Tabela Iceberg {database}.{table_name} criada")
-                
-                # Escrever dados no local da tabela
-                wr.s3.to_parquet(
-                    df=df_prepared,
-                    path=table_location,
-                    dataset=True,
-                    mode="append",
-                    partition_cols=["ingestion_date"],
-                    database=database,
-                    table=table_name,
-                    catalog_id=None,
-                    catalog_versioning=False
-                )
-                logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.s3.to_parquet")
-                success = True
-            except Exception as e4:
-                error_msgs.append(f"Erro no fallback: {e4}")
-        
-        if success:
-            logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} ({len(df)} registros)")
+            logger.info(f"Dados escritos na tabela Hive {database}.{table_name} (não Iceberg)")
             return True
-        else:
-            logger.error(f"Todos os métodos falharam para escrever no Iceberg {database}.{table_name}:")
-            for msg in error_msgs:
-                logger.error(f"  - {msg}")
-            return False
-            
     except Exception as e:
         logger.error(f"Erro ao escrever no Iceberg {database}.{table_name}: {str(e)}")
         logger.error(traceback.format_exc())

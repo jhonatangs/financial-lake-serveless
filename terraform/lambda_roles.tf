@@ -126,7 +126,9 @@ resource "aws_iam_role_policy" "transformer_policy" {
       {
         Action = [
           "glue:GetDatabase",
+          "glue:GetDatabases",
           "glue:GetTable",
+          "glue:GetTables",
           "glue:CreateTable",
           "glue:UpdateTable",
           "glue:DeleteTable"
