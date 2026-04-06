@@ -124,9 +124,11 @@ resource "aws_lambda_function" "transformer_trusted" {
   memory_size   = 512  # 512 MB conforme especificação
   filename      = "dummy.zip"
 
-  # NOTA: Não usamos layer AWS Managed devido a problemas de disponibilidade.
-  # As dependências (awswrangler, pandas) serão incluídas no pacote de deployment.
-  # O workflow CI/CD instalará as dependências via pip no container Amazon Linux.
+  # AWS Managed Layer para awswrangler (AWS SDK for pandas) - Python 3.12
+  # ARN verificada: versão 14 disponível na região us-east-1
+  layers = [
+    "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:14"
+  ]
 
   environment {
     variables = {
