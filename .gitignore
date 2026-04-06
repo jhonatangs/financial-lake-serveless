@@ -22,5 +22,6 @@ __pycache__/
 .aider*
 
 # Testing Environment
-payload.json
+payload_yfinance.json
+payload_coingecko.json
 response.json

@@ -87,7 +87,7 @@ resource "aws_lambda_permission" "allow_eventbridge_coingecko" {
 resource "aws_lambda_function" "consumer_s3" {
   function_name = "financial-consumer-s3"
   role          = aws_iam_role.consumer_role.arn
-  handler       = "consumer.lambda_handler"
+  handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
   timeout       = 120
   memory_size   = 256
