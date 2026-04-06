@@ -113,3 +113,32 @@ resource "aws_lambda_event_source_mapping" "sqs_to_lambda" {
   # Retorna apenas os itens que falharam, não o lote todo
   function_response_types = ["ReportBatchItemFailures"]
 }
+
+# Lambda Transformer Trusted
+resource "aws_lambda_function" "transformer_trusted" {
+  function_name = "financial-transformer-trusted"
+  role          = aws_iam_role.transformer_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.12"
+  timeout       = 300  # 5 minutos conforme especificação
+  memory_size   = 512  # 512 MB conforme especificação
+  filename      = "dummy.zip"
+
+  # AWS Managed Layer para awswrangler (AWS SDK for pandas)
+  layers = [
+    "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:11"
+  ]
+
+  environment {
+    variables = {
+      TRUSTED_BUCKET       = aws_s3_bucket.layers["trusted"].bucket
+      GLUE_DATABASE_NAME   = var.glue_database_name
+      ICEBERG_LOCATION_PREFIX = var.iceberg_table_location_prefix
+      LOG_LEVEL            = "INFO"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [source_code_hash, filename]
+  }
+}

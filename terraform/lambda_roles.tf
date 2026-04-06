@@ -82,3 +82,76 @@ resource "aws_iam_role_policy" "consumer_policy" {
     ]
   })
 }
+
+# Role para a Lambda Transformer Trusted
+resource "aws_iam_role" "transformer_role" {
+  name               = "financial-transformer-lambda-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  description        = "Role usada pela lambda transformer_trusted para ler S3 raw, escrever S3 trusted e acessar Glue Data Catalog"
+}
+
+resource "aws_iam_role_policy" "transformer_policy" {
+  name = "transformer-s3-glue-policy"
+  role = aws_iam_role.transformer_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # Leitura do bucket raw
+      {
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Effect   = "Allow"
+        Resource = [
+          aws_s3_bucket.layers["raw"].arn,
+          "${aws_s3_bucket.layers["raw"].arn}/*"
+        ]
+      },
+      # Escrita no bucket trusted (para tabelas Iceberg)
+      {
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Effect   = "Allow"
+        Resource = [
+          aws_s3_bucket.layers["trusted"].arn,
+          "${aws_s3_bucket.layers["trusted"].arn}/*"
+        ]
+      },
+      # Permissões Glue Data Catalog (Iceberg)
+      {
+        Action = [
+          "glue:GetDatabase",
+          "glue:GetTable",
+          "glue:CreateTable",
+          "glue:UpdateTable",
+          "glue:DeleteTable"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      # Permissões Lake Formation (necessárias para operações Iceberg)
+      {
+        Action = [
+          "lakeformation:GetDataAccess"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      # Logs
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
