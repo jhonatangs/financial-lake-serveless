@@ -1,4 +1,4 @@
-name: Deploy Lambda Producer yFinance
+name: Deploy Lambda Producers
 
 on:
   push:
@@ -6,13 +6,24 @@ on:
       - main
     paths:
       - 'src/producer_yfinance/**'
+      - 'src/producer_coingecko/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:  # Permite disparo manual
 
 jobs:
   deploy:
-    name: Deploy to AWS Lambda
+    name: Deploy ${{ matrix.function_name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - function_dir: producer_yfinance
+            function_name: financial-producer-yfinance
+          - function_dir: producer_coingecko
+            function_name: financial-producer-coingecko
+    env:
+      FUNCTION_DIR: ${{ matrix.function_dir }}
+      FUNCTION_NAME: ${{ matrix.function_name }}
 
     steps:
       - name: Checkout repository
@@ -21,7 +32,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'  # Versão especificada na spec
+          python-version: '3.12'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -47,7 +58,7 @@ jobs:
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --entrypoint pip \
-            -v ${{ github.workspace }}/src/producer_yfinance/requirements.txt:/tmp/requirements.txt \
+            -v ${{ github.workspace }}/src/${{ env.FUNCTION_DIR }}/requirements.txt:/tmp/requirements.txt \
             -v /tmp/lambda_package:/tmp/lambda_package \
             public.ecr.aws/lambda/python:3.12 \
             install --target /tmp/lambda_package -r /tmp/requirements.txt
@@ -55,7 +66,7 @@ jobs:
 
       - name: Copy Lambda function code
         run: |
-          cp ${{ github.workspace }}/src/producer_yfinance/lambda_function.py /tmp/lambda_package/
+          cp ${{ github.workspace }}/src/${{ env.FUNCTION_DIR }}/lambda_function.py /tmp/lambda_package/
           echo "Lambda function copied"
 
       - name: Create deployment package (zip)
@@ -69,7 +80,7 @@ jobs:
         run: |
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           COMMIT_SHA_SHORT=$(echo ${{ github.sha }} | cut -c1-8)
-          S3_KEY="deployment_packages/financial-producer-yfinance-${COMMIT_SHA_SHORT}-${TIMESTAMP}.zip"
+          S3_KEY="deployment_packages/${{ env.FUNCTION_NAME }}-${COMMIT_SHA_SHORT}-${TIMESTAMP}.zip"
           echo "S3_KEY=${S3_KEY}" >> $GITHUB_OUTPUT
           echo "Generated S3 key: ${S3_KEY}"
 
@@ -91,7 +102,7 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME }}
         run: |
           aws lambda update-function-code \
-            --function-name financial-producer-yfinance \
+            --function-name ${{ env.FUNCTION_NAME }} \
             --s3-bucket $S3_BUCKET_NAME \
             --s3-key ${{ steps.s3key.outputs.S3_KEY }} \
             --region ${{ secrets.AWS_REGION || 'us-east-1' }}
