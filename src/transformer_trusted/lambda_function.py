@@ -1,8 +1,9 @@
 import os
 import json
 import logging
+import traceback
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import boto3
 import awswrangler as wr
 import pandas as pd
@@ -40,7 +41,6 @@ def extract_partition_date(s3_key: str) -> Optional[str]:
     Retorna string no formato 'YYYY-MM-DD'.
     """
     try:
-        # Procura padrão year=XXXX/month=XX/day=XX
         import re
         pattern = r"year=(\d{4})/month=(\d{2})/day=(\d{2})"
         match = re.search(pattern, s3_key)
@@ -51,6 +51,25 @@ def extract_partition_date(s3_key: str) -> Optional[str]:
         pass
     return None
 
+def extract_coin_id_from_key(s3_key: str) -> str:
+    """
+    Extrai o coin_id do caminho S3 para dados CoinGecko.
+    O padrão esperado é: raw/producer_coingecko/year=.../month=.../day=.../coin_id/arquivo.json
+    """
+    parts = s3_key.split("/")
+    # Remover partes vazias
+    parts = [p for p in parts if p]
+    # Procurar pelo segmento que não é year=..., month=..., day=... e não é o arquivo .json
+    for i, part in enumerate(parts):
+        if part.startswith(("year=", "month=", "day=")):
+            continue
+        # Se não for o último (arquivo) e não for "raw" nem "producer_coingecko"
+        if i < len(parts)-1 and part not in ("raw", "producer_coingecko"):
+            # O próximo não é um padrão de data? então este é o coin_id
+            if not parts[i+1].startswith(("year=", "month=", "day=")):
+                return part
+    return "unknown"
+
 def transform_coingecko_data(raw_json: list, s3_key: str) -> pd.DataFrame:
     """
     Transforma dados do CoinGecko (array de arrays) em DataFrame.
@@ -60,37 +79,30 @@ def transform_coingecko_data(raw_json: list, s3_key: str) -> pd.DataFrame:
         if len(item) >= 5:
             timestamp_ms, open_price, high, low, close = item[:5]
             # Converter milissegundos para datetime UTC
-            dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
+            try:
+                dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
+            except (ValueError, OSError):
+                dt = pd.NaT
             records.append({
                 "timestamp": dt,
-                "open": float(open_price),
-                "high": float(high),
-                "low": float(low),
-                "close": float(close)
+                "open": float(open_price) if open_price is not None else None,
+                "high": float(high) if high is not None else None,
+                "low": float(low) if low is not None else None,
+                "close": float(close) if close is not None else None
             })
     
     df = pd.DataFrame(records)
     if not df.empty:
-        # Extrair coin_id do caminho (último diretório antes do filename)
-        parts = s3_key.split("/")
-        # O padrão é raw/producer_coingecko/year=.../.../coin_id/arquivo.json
-        # Vamos pegar o diretório imediatamente antes do arquivo
-        if len(parts) >= 2:
-            coin_id_candidate = parts[-2]
-            # Se não for um padrão de data (year=...), assume como coin_id
-            if not coin_id_candidate.startswith(("year=", "month=", "day=")):
-                df["coin_id"] = coin_id_candidate
-            else:
-                df["coin_id"] = "unknown"
-        else:
-            df["coin_id"] = "unknown"
+        # Extrair coin_id
+        coin_id = extract_coin_id_from_key(s3_key)
+        df["coin_id"] = coin_id
         
         # Adicionar ingestion_date
         ingestion_date = extract_partition_date(s3_key)
         if ingestion_date:
             df["ingestion_date"] = pd.to_datetime(ingestion_date).date()
         else:
-            df["ingestion_date"] = pd.Timestamp.now().date()
+            df["ingestion_date"] = pd.Timestamp.now(tz=timezone.utc).date()
     
     return df
 
@@ -98,8 +110,6 @@ def transform_yfinance_data(raw_json: dict, s3_key: str) -> pd.DataFrame:
     """
     Transforma dados do Yahoo Finance (JSON com campos OHLCV) em DataFrame.
     """
-    # O formato esperado é um dict com campos como:
-    # {"ticker": "AAPL", "open": 182.63, "high": 183.0, "low": 181.5, "close": 182.8, "volume": 1000000, "timestamp": "2025-04-05T18:00:00Z"}
     records = []
     
     # Se for uma lista de registros, processa cada um
@@ -115,10 +125,18 @@ def transform_yfinance_data(raw_json: dict, s3_key: str) -> pd.DataFrame:
             if ts_str:
                 try:
                     dt = pd.to_datetime(ts_str, utc=True)
-                except:
+                except Exception:
                     dt = pd.NaT
             else:
                 dt = pd.NaT
+            
+            # Garantir que volume seja inteiro
+            volume = item.get("volume")
+            if volume is not None:
+                try:
+                    volume = int(volume)
+                except (ValueError, TypeError):
+                    volume = None
             
             record = {
                 "timestamp": dt,
@@ -126,7 +144,7 @@ def transform_yfinance_data(raw_json: dict, s3_key: str) -> pd.DataFrame:
                 "high": item.get("high"),
                 "low": item.get("low"),
                 "close": item.get("close"),
-                "volume": item.get("volume"),
+                "volume": volume,
                 "ticker": item.get("ticker", "unknown")
             }
             records.append(record)
@@ -138,7 +156,34 @@ def transform_yfinance_data(raw_json: dict, s3_key: str) -> pd.DataFrame:
         if ingestion_date:
             df["ingestion_date"] = pd.to_datetime(ingestion_date).date()
         else:
-            df["ingestion_date"] = pd.Timestamp.now().date()
+            df["ingestion_date"] = pd.Timestamp.now(tz=timezone.utc).date()
+    
+    return df
+
+def prepare_dataframe_for_iceberg(df: pd.DataFrame, table_type: str) -> pd.DataFrame:
+    """
+    Ajusta tipos de colunas para compatibilidade com Iceberg.
+    """
+    if df.empty:
+        return df
+    
+    # Converter timestamp para datetime[ns, UTC]
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    
+    # Garantir que colunas numéricas sejam float
+    numeric_cols = ["open", "high", "low", "close"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    
+    # Volume deve ser Int64 (permite NaN)
+    if "volume" in df.columns:
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce").astype("Int64")
+    
+    # ingestion_date deve ser date
+    if "ingestion_date" in df.columns:
+        df["ingestion_date"] = pd.to_datetime(df["ingestion_date"]).dt.date
     
     return df
 
@@ -154,41 +199,35 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
         # Localização S3 para a tabela Iceberg
         table_location = f"s3://{bucket}/{location_prefix}{table_name}/"
         
-        # Verificar se a tabela existe
-        table_exists = False
-        try:
-            wr.catalog.table(database=database, table=table_name)
-            table_exists = True
-        except Exception:
-            table_exists = False
+        # Preparar DataFrame
+        df_prepared = prepare_dataframe_for_iceberg(df, table_name)
         
-        # Se não existir, criar a tabela
-        if not table_exists:
-            logger.info(f"Criando tabela Iceberg {database}.{table_name}")
-            # Definir schema a partir do DataFrame
-            # O awswrangler.to_iceberg criará a tabela automaticamente se não existir
-            pass
-        
-        # Escrever dados (append)
+        # Escrever dados (append) - awswrangler cria a tabela automaticamente se não existir
         wr.dataframes.to_iceberg(
-            df=df,
+            df=df_prepared,
             database=database,
             table=table_name,
             table_location=table_location,
             partition_cols=["ingestion_date"],
-            mode="append"
+            mode="append",
+            catalog_id=None,  # Usar catálogo da conta atual
+            catalog_versioning=False
         )
         logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} ({len(df)} registros)")
         return True
     except Exception as e:
         logger.error(f"Erro ao escrever no Iceberg {database}.{table_name}: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Handler principal da Lambda Transformer Trusted.
     """
-    logger.info(f"Evento recebido: {json.dumps(event)}")
+    logger.info(f"Evento recebido com {len(event.get('Records', []))} registros")
+    
+    processed = 0
+    failed = 0
     
     # Processar cada registro do evento S3
     for record in event.get("Records", []):
@@ -202,6 +241,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             source = extract_source_from_key(s3_key)
             if not source:
                 logger.warning(f"Origem desconhecida para key {s3_key}, ignorando.")
+                failed += 1
                 continue
             
             # Baixar e carregar JSON do S3
@@ -218,6 +258,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 table_name = "trusted_stocks_ohlcv"
             else:
                 logger.error(f"Origem {source} não suportada")
+                failed += 1
+                continue
+            
+            if df.empty:
+                logger.warning(f"DataFrame vazio após transformação para {s3_key}")
+                processed += 1
                 continue
             
             logger.info(f"DataFrame transformado: {len(df)} linhas, {len(df.columns)} colunas")
@@ -233,15 +279,25 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             if success:
                 logger.info(f"Processamento concluído com sucesso para {s3_key}")
+                processed += 1
             else:
                 logger.error(f"Falha ao processar {s3_key}")
+                failed += 1
                 # Em produção, poderia enviar para DLQ
                 
         except Exception as e:
             logger.error(f"Erro ao processar registro: {str(e)}")
+            logger.error(traceback.format_exc())
+            failed += 1
             # Continuar processando outros registros
+    
+    logger.info(f"Processamento finalizado: {processed} sucessos, {failed} falhas")
     
     return {
         "statusCode": 200,
-        "body": json.dumps({"message": "Processamento concluído"})
+        "body": json.dumps({
+            "message": "Processamento concluído",
+            "processed": processed,
+            "failed": failed
+        })
     }
