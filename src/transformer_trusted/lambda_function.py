@@ -70,13 +70,39 @@ def extract_coin_id_from_key(s3_key: str) -> str:
                 return part
     return "unknown"
 
-def transform_coingecko_data(raw_json: list, s3_key: str) -> pd.DataFrame:
+def transform_coingecko_data(raw_json: Any, s3_key: str) -> pd.DataFrame:
     """
-    Transforma dados do CoinGecko (array de arrays) em DataFrame.
+    Transforma dados do CoinGecko em DataFrame.
+    Suporta dois formatos:
+    1. Novo formato: dict com 'coin_id' e 'ohlc_data'
+    2. Formato antigo: list de listas (para compatibilidade)
     """
     records = []
-    for item in raw_json:
-        if len(item) >= 5:
+    coin_id = "unknown"
+    
+    # Caso 1: Novo formato (dicionário)
+    if isinstance(raw_json, dict):
+        # Extrair coin_id do JSON
+        coin_id = raw_json.get("coin_id", "unknown")
+        
+        # Extrair ohlc_data
+        ohlc_data = raw_json.get("ohlc_data", [])
+        if not isinstance(ohlc_data, list):
+            logger.error(f"ohlc_data não é uma lista: tipo {type(ohlc_data)}")
+            return pd.DataFrame()
+        data_to_process = ohlc_data
+    # Caso 2: Formato antigo (lista de listas)
+    elif isinstance(raw_json, list):
+        # Para compatibilidade, usar coin_id extraído do caminho S3
+        coin_id = extract_coin_id_from_key(s3_key)
+        data_to_process = raw_json
+    else:
+        logger.error(f"JSON inesperado para CoinGecko: tipo {type(raw_json)}")
+        return pd.DataFrame()
+    
+    # Processar cada item OHLC
+    for item in data_to_process:
+        if isinstance(item, list) and len(item) >= 5:
             timestamp_ms, open_price, high, low, close = item[:5]
             # Converter milissegundos para datetime UTC
             try:
@@ -90,14 +116,15 @@ def transform_coingecko_data(raw_json: list, s3_key: str) -> pd.DataFrame:
                 "low": float(low) if low is not None else None,
                 "close": float(close) if close is not None else None
             })
+        else:
+            logger.warning(f"Item em dados OHLC não é uma lista válida: {item}")
     
     df = pd.DataFrame(records)
     if not df.empty:
-        # Extrair coin_id
-        coin_id = extract_coin_id_from_key(s3_key)
+        # Usar coin_id (extraído do JSON ou do caminho S3)
         df["coin_id"] = coin_id
         
-        # Adicionar ingestion_date
+        # Adicionar ingestion_date a partir do caminho S3
         ingestion_date = extract_partition_date(s3_key)
         if ingestion_date:
             df["ingestion_date"] = pd.to_datetime(ingestion_date).date()
