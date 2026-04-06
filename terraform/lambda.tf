@@ -95,7 +95,7 @@ resource "aws_lambda_function" "consumer_s3" {
 
   environment {
     variables = {
-      BRONZE_BUCKET = aws_s3_bucket.layers["bronze"].bucket
+      RAW_BUCKET = aws_s3_bucket.layers["raw"].bucket
     }
   }
 

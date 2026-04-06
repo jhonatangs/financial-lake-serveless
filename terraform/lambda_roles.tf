@@ -68,7 +68,7 @@ resource "aws_iam_role_policy" "consumer_policy" {
           "s3:PutObject"
         ]
         Effect   = "Allow"
-        Resource = "${aws_s3_bucket.layers["bronze"].arn}/*" 
+        Resource = "${aws_s3_bucket.layers["raw"].arn}/*" 
       },
       {
         Action = [

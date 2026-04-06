@@ -5,5 +5,5 @@ resource "random_id" "bucket_suffix" {
 variable "buckets" {
     description = "List of buckets"
     type        = list(string)
-    default     = ["bronze", "silver", "gold"]
+    default     = ["raw", "trusted"]
 }
