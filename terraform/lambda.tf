@@ -77,6 +77,28 @@ resource "aws_lambda_permission" "allow_eventbridge_crypto" {
   source_arn    = aws_cloudwatch_event_rule.daily_market_close.arn
 }
 
+resource "aws_lambda_function" "producer_coingecko" {
+  function_name = "financial-producer-coingecko"
+  role          = aws_iam_role.producer_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.12"
+  timeout       = 300  # 5 minutos, conforme especificação
+  memory_size   = 256
+  filename      = "dummy.zip"
+
+  environment {
+    variables = {
+      SQS_QUEUE_URL = aws_sqs_queue.financial_data_queue.id
+      SQS_DLQ_URL   = aws_sqs_queue.financial_dlq.id
+      LOG_LEVEL     = "INFO"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [source_code_hash, filename]
+  }
+}
+
 resource "aws_lambda_function" "consumer_s3" {
   function_name = "financial-consumer-s3"
   role          = aws_iam_role.consumer_role.arn
@@ -105,4 +127,25 @@ resource "aws_lambda_event_source_mapping" "sqs_to_lambda" {
   
   # Retorna apenas os itens que falharam, não o lote todo
   function_response_types = ["ReportBatchItemFailures"]
+}
+
+# Nova regra EventBridge para acionar diariamente às 00:00 UTC
+resource "aws_cloudwatch_event_rule" "daily_midnight" {
+  name                = "trigger-daily-midnight-coingecko"
+  description         = "Dispara a lambda producer_coingecko diariamente à meia-noite UTC"
+  schedule_expression = "cron(0 0 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "target_coingecko" {
+  rule      = aws_cloudwatch_event_rule.daily_midnight.name
+  target_id = "TriggerCoingecko"
+  arn       = aws_lambda_function.producer_coingecko.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_coingecko" {
+  statement_id  = "AllowExecutionFromEventBridgeCoingecko"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.producer_coingecko.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_midnight.arn
 }

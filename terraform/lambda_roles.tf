@@ -11,6 +11,7 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 resource "aws_iam_role" "producer_role" {
   name               = "financial-producer-lambda-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  description        = "Role usada pelas lambdas producer (yfinance, crypto, coingecko) para enviar mensagens para SQS e escrever logs"
 }
 
 resource "aws_iam_role_policy" "producer_policy" {
