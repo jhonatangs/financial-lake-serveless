@@ -189,7 +189,7 @@ def prepare_dataframe_for_iceberg(df: pd.DataFrame) -> pd.DataFrame:
 
 def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: str, location_prefix: str) -> bool:
     """
-    Escreve DataFrame em tabela Iceberg usando awswrangler 3.10.0.
+    Escreve DataFrame em tabela Iceberg usando awswrangler via Athena.
     """
     if df.empty:
         logger.warning(f"DataFrame vazio para tabela {table_name}, ignorando.")
@@ -202,18 +202,16 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
         # Preparar DataFrame
         df_prepared = prepare_dataframe_for_iceberg(df)
         
-        # Escrever usando wr.iceberg.to_iceberg
-        wr.iceberg.to_iceberg(
+        # Escrever usando wr.athena.to_iceberg
+        wr.athena.to_iceberg(
             df=df_prepared,
             database=database,
             table=table_name,
             table_location=table_location,
-            partition_cols=["ingestion_date"],
-            mode="append",
-            catalog_id=None,
-            catalog_versioning=False
+            temp_path=f"s3://{bucket}/{location_prefix}temp/",
+            partition_cols=["ingestion_date"]
         )
-        logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.iceberg.to_iceberg")
+        logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.athena.to_iceberg")
         return True
     except Exception as e:
         logger.error(f"Erro ao escrever no Iceberg {database}.{table_name}: {str(e)}")

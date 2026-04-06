@@ -144,6 +144,17 @@ resource "aws_iam_role_policy" "transformer_policy" {
         Effect   = "Allow"
         Resource = "*"
       },
+      # Permissões Athena (necessárias para wr.athena.to_iceberg)
+      {
+        Action = [
+          "athena:StartQueryExecution",
+          "athena:GetQueryExecution",
+          "athena:GetQueryResults",
+          "athena:GetWorkGroup"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
       # Logs
       {
         Action = [
