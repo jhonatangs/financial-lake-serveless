@@ -3,9 +3,9 @@ resource "random_id" "bucket_suffix" {
 }
 
 variable "buckets" {
-    description = "List of buckets"
-    type        = list(string)
-    default     = ["raw", "trusted"]
+  description = "List of buckets"
+  type        = list(string)
+  default     = ["raw", "trusted"]
 }
 
 variable "glue_database_name" {

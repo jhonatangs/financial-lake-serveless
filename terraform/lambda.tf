@@ -3,14 +3,14 @@ resource "aws_lambda_function" "producer_yfinance" {
   role          = aws_iam_role.producer_role.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
-  timeout       = 60 
+  timeout       = 60
   memory_size   = 128
   filename      = "dummy.zip"
 
   environment {
     variables = {
       SQS_QUEUE_URL = aws_sqs_queue.financial_data_queue.id
-      SQS_DLQ_URL = aws_sqs_queue.financial_dlq.id
+      SQS_DLQ_URL   = aws_sqs_queue.financial_dlq.id
     }
   }
 
@@ -47,7 +47,7 @@ resource "aws_lambda_function" "producer_coingecko" {
   role          = aws_iam_role.producer_role.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
-  timeout       = 300  # 5 minutos, conforme especificação
+  timeout       = 300 # 5 minutos, conforme especificação
   memory_size   = 256
   filename      = "dummy.zip"
 
@@ -105,11 +105,11 @@ resource "aws_lambda_function" "consumer_s3" {
 }
 
 resource "aws_lambda_event_source_mapping" "sqs_to_lambda" {
-  event_source_arn = aws_sqs_queue.financial_data_queue.arn
-  function_name    = aws_lambda_function.consumer_s3.arn
-  batch_size       = 100
+  event_source_arn                   = aws_sqs_queue.financial_data_queue.arn
+  function_name                      = aws_lambda_function.consumer_s3.arn
+  batch_size                         = 100
   maximum_batching_window_in_seconds = 60
-  
+
   # Retorna apenas os itens que falharam, não o lote todo
   function_response_types = ["ReportBatchItemFailures"]
 }
@@ -120,8 +120,8 @@ resource "aws_lambda_function" "transformer_trusted" {
   role          = aws_iam_role.transformer_role.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
-  timeout       = 300  # 5 minutos conforme especificação
-  memory_size   = 512  # 512 MB conforme especificação
+  timeout       = 300 # 5 minutos conforme especificação
+  memory_size   = 512 # 512 MB conforme especificação
   filename      = "dummy.zip"
 
   # AWS Managed Layer para awswrangler (AWS SDK for pandas) - Python 3.12
@@ -132,10 +132,10 @@ resource "aws_lambda_function" "transformer_trusted" {
 
   environment {
     variables = {
-      TRUSTED_BUCKET       = aws_s3_bucket.layers["trusted"].bucket
-      GLUE_DATABASE_NAME   = var.glue_database_name
+      TRUSTED_BUCKET          = aws_s3_bucket.layers["trusted"].bucket
+      GLUE_DATABASE_NAME      = var.glue_database_name
       ICEBERG_LOCATION_PREFIX = var.iceberg_table_location_prefix
-      LOG_LEVEL            = "INFO"
+      LOG_LEVEL               = "INFO"
     }
   }
 

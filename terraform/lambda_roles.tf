@@ -24,7 +24,7 @@ resource "aws_iam_role_policy" "producer_policy" {
         Action = [
           "sqs:SendMessage"
         ]
-        Effect   = "Allow"
+        Effect = "Allow"
         Resource = [
           aws_sqs_queue.financial_data_queue.arn,
           aws_sqs_queue.financial_dlq.arn
@@ -68,7 +68,7 @@ resource "aws_iam_role_policy" "consumer_policy" {
           "s3:PutObject"
         ]
         Effect   = "Allow"
-        Resource = "${aws_s3_bucket.layers["raw"].arn}/*" 
+        Resource = "${aws_s3_bucket.layers["raw"].arn}/*"
       },
       {
         Action = [
@@ -102,7 +102,7 @@ resource "aws_iam_role_policy" "transformer_policy" {
           "s3:GetObject",
           "s3:ListBucket"
         ]
-        Effect   = "Allow"
+        Effect = "Allow"
         Resource = [
           aws_s3_bucket.layers["raw"].arn,
           "${aws_s3_bucket.layers["raw"].arn}/*"
@@ -116,7 +116,7 @@ resource "aws_iam_role_policy" "transformer_policy" {
           "s3:DeleteObject",
           "s3:ListBucket"
         ]
-        Effect   = "Allow"
+        Effect = "Allow"
         Resource = [
           aws_s3_bucket.layers["trusted"].arn,
           "${aws_s3_bucket.layers["trusted"].arn}/*"
