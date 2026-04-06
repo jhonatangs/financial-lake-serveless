@@ -202,6 +202,9 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
         # Preparar DataFrame
         df_prepared = prepare_dataframe_for_iceberg(df)
         
+        # Caminho para os resultados do Athena (evita criação de bucket padrão)
+        s3_output = f"s3://{bucket}/athena-results/"
+        
         # Escrever usando wr.athena.to_iceberg
         wr.athena.to_iceberg(
             df=df_prepared,
@@ -209,7 +212,8 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
             table=table_name,
             table_location=table_location,
             temp_path=f"s3://{bucket}/{location_prefix}temp/",
-            partition_cols=["ingestion_date"]
+            partition_cols=["ingestion_date"],
+            s3_output=s3_output
         )
         logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.athena.to_iceberg")
         return True
