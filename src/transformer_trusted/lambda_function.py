@@ -160,7 +160,7 @@ def transform_yfinance_data(raw_json: dict, s3_key: str) -> pd.DataFrame:
     
     return df
 
-def prepare_dataframe_for_iceberg(df: pd.DataFrame, table_type: str) -> pd.DataFrame:
+def prepare_dataframe_for_iceberg(df: pd.DataFrame) -> pd.DataFrame:
     """
     Ajusta tipos de colunas para compatibilidade com Iceberg.
     """
@@ -189,8 +189,7 @@ def prepare_dataframe_for_iceberg(df: pd.DataFrame, table_type: str) -> pd.DataF
 
 def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: str, location_prefix: str) -> bool:
     """
-    Escreve DataFrame em tabela Iceberg usando awswrangler.
-    Usa wr.s3.to_parquet com iceberg_integration=True (awswrangler 2.x).
+    Escreve DataFrame em tabela Iceberg usando awswrangler 3.10.0.
     """
     if df.empty:
         logger.warning(f"DataFrame vazio para tabela {table_name}, ignorando.")
@@ -201,41 +200,21 @@ def write_to_iceberg(df: pd.DataFrame, table_name: str, database: str, bucket: s
         table_location = f"s3://{bucket}/{location_prefix}{table_name}/"
         
         # Preparar DataFrame
-        df_prepared = prepare_dataframe_for_iceberg(df, table_name)
+        df_prepared = prepare_dataframe_for_iceberg(df)
         
-        # Tentar com iceberg_integration=True
-        try:
-            wr.s3.to_parquet(
-                df=df_prepared,
-                path=table_location,
-                dataset=True,
-                mode="append",
-                partition_cols=["ingestion_date"],
-                database=database,
-                table=table_name,
-                catalog_id=None,
-                catalog_versioning=False,
-                iceberg_integration=True
-            )
-            logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.s3.to_parquet com iceberg_integration")
-            return True
-        except TypeError as e:
-            # iceberg_integration pode não ser suportado
-            logger.warning(f"iceberg_integration não suportado: {e}. Tentando sem...")
-            # Tentar sem iceberg_integration (cria tabela Hive normal)
-            wr.s3.to_parquet(
-                df=df_prepared,
-                path=table_location,
-                dataset=True,
-                mode="append",
-                partition_cols=["ingestion_date"],
-                database=database,
-                table=table_name,
-                catalog_id=None,
-                catalog_versioning=False
-            )
-            logger.info(f"Dados escritos na tabela Hive {database}.{table_name} (não Iceberg)")
-            return True
+        # Escrever usando wr.iceberg.to_iceberg
+        wr.iceberg.to_iceberg(
+            df=df_prepared,
+            database=database,
+            table=table_name,
+            table_location=table_location,
+            partition_cols=["ingestion_date"],
+            mode="append",
+            catalog_id=None,
+            catalog_versioning=False
+        )
+        logger.info(f"Dados escritos na tabela Iceberg {database}.{table_name} via wr.iceberg.to_iceberg")
+        return True
     except Exception as e:
         logger.error(f"Erro ao escrever no Iceberg {database}.{table_name}: {str(e)}")
         logger.error(traceback.format_exc())
